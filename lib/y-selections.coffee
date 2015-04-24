@@ -69,12 +69,15 @@ class YSelections
                 sel = ref.selection
                 # delete it, because ref is going to get deleted!
                 delete ref.selection
+                # if the selection is 0-length
                 if sel.from is ref and sel.to is ref
                   @_removeFromCompositionValue sel
+                # if the selection started here, move it to next element
                 else if sel.from is ref
                   next = ref.getNext()
                   sel.from = next
                   next.selection = sel
+                # if the selection ends here, move it to previous element
                 else if sel.to is ref
                   prev = ref.getPrev()
                   sel.to = prev
@@ -95,6 +98,7 @@ class YSelections
     for listener in @_listeners
       listener.call this, observer_call
 
+    # create a new selection and add it to the stack of composition values
     createSelection = (from, to, attrs)=>
       new_attrs = {}
       for key,value of attrs
@@ -106,7 +110,9 @@ class YSelections
       @_composition_value.push new_sel
       new_sel
 
+    # is extend the right name?
     extendSelection = (selection)->
+      # remove the attributes from the selection
       if delta.type is "unselect"
         undo_attrs = {}
         for key in delta.attrs
@@ -129,10 +135,12 @@ class YSelections
           if selection.attrs[key]?
             undo_attrs[key] = selection.attrs[key]
             undo_need_select = true
+          # if key not already defined reversing it is like unselecting it
           else
             undo_attrs_list.push key
             undo_need_unselect = true
           selection.attrs[key] = value
+        # push all the undos to $undos
         if undo_need_select
           undos.push
             from:  delta.from
@@ -149,14 +157,13 @@ class YSelections
     # Algorithm overview:
     # 1. cut off the selection that intersects with from
     # 2. cut off the selection that intersects with to
-    # 3. extend / add selections inbetween
+    # 3. extend / add selections in between
     #
     #### 1. cut off the selection that intersects with from
     #
     cut_off_from = ()->
-      # check if a selection (to the left of $from) intersects with $from
+      # does not intersect, because the start is already selected
       if from.selection? and from.selection.from is from
-        # does not intersect, because the start is already selected
         return
       # find first element that has a delimiter (and stop if its a delimiter,
       # a.k.a the end of the list)
@@ -195,11 +202,11 @@ class YSelections
         # create $new_selection
         new_selection = createSelection from, old_selection.to, old_selection.attrs
 
-        # update references
+        # update references of old_selection
         old_selection.to = from.prev_cl
-        # update references (pointers to respective selections)
         old_selection.to.selection = old_selection
 
+        # set references of new_selection
         new_selection.from.selection = new_selection
         new_selection.to.selection = new_selection
       else
@@ -213,7 +220,6 @@ class YSelections
 
         # update references
         old_selection.to = from.prev_cl
-        # update references (pointers to respective selections)
         old_selection.to.selection = old_selection
 
         opt_selection.from.selection = opt_selection
@@ -332,17 +338,19 @@ class YSelections
       # there is no selection to the left
       return
     else
+      # if they have the sames attributes, merge them
       if compare_objects(first_o.selection.attrs, sel.attrs)
         # we are going to remove the left selection
         # First, remove every trace of first_o.selection (save what is necessary)
         # Then, re-set sel.from
-        #
         new_from = first_o.selection.from
         @_removeFromCompositionValue first_o.selection
 
+        # delete old selection
         if sel.from isnt sel.to
           delete sel.from.selection
 
+        # bind new selection
         sel.from = new_from
         new_from.selection = sel
       else
@@ -416,12 +424,14 @@ class YSelections
         element = element.next_cl
         continue
       if element.selection?
+        # if a selection starts here, save the start position
         if element.selection.from is element
           if sel_start?
             throw new Error "Found two consecutive from elements. The selections
               are no longer safe to use! (contact the owner of the repository)"
           else
             sel_start = pos
+        # if a selection ends here, add it to return value
         if element.selection.to is element
           if sel_start?
             number_of_attrs = 0
@@ -438,6 +448,7 @@ class YSelections
           else
             throw new Error "Found two consecutive to elements. The selections
               are no longer safe to use! (contact the owner of the repository)"
+        # can it happen since we checked that element.Selection.from is element
         else if element.selection.from isnt element
           throw new Error "This reference should not point to this selection,
             because the selection does not point to the reference. The
