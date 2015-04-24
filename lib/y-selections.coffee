@@ -59,9 +59,28 @@ class YSelections
   # @option delta [String] type either "select" or "unselect"
   _apply: (delta)->
     undos = [] # list of deltas that are necessary to undo the change
+
+    if delta.from.isDeleted()
+      delta.from = delta.from.getNext()
+    if delta.to.isDeleted()
+      delta.to = delta.to.getPrev()
+
     from = delta.from
     to = delta.to
+    if from.getPrev() is to
+      # There is nothing to select anymore!
+      return undos
 
+
+    #
+    # Assuming $from is deleted at some point. We need to change the selection
+    # _before_ the GC removes it completely from the list. Therefore, we listen to
+    # "delete" events, and if that particular operation has a selection
+    # (o.sselection?) we move the selection to the next undeleted operation, if
+    # any. It also handles the case that there is nothing to select anymore (e.g.
+    # everything inside the selection is deleted). Then we remove the selection
+    # completely
+    #    
     # if never applied a delta on this list, add a listener to it in order to
     # change selections if necessary
     if delta.type is "select"
@@ -142,6 +161,16 @@ class YSelections
         undo_attrs_list = [] # for undo selection (not overwrite)
         undo_need_unselect = false
         undo_need_select = false
+        if delta.overwrite? and delta.overwrite
+          # overwrite everything that the delta doesn't expect
+          for key, value of selection.attrs
+            if not delta.attrs[key]?
+              undo_need_select = true
+              undo_attrs[key] = value
+          # must not delete attributes of $selection.attrs in this loop,
+          # so we do it in the next one
+          for key,value of undo_attrs
+            delete selection.attrs[key]
         for key,value of delta.attrs
           # if key already defined, reversing it is selecting with previous attrs
           if selection.attrs[key]?
@@ -155,14 +184,14 @@ class YSelections
         # push all the undos to $undos
         if undo_need_select
           undos.push
-            from:  delta.from
-            to:    delta.to
+            from:  selection.from
+            to:    selection.to
             attrs: undo_attrs
-            type:  "select"
+            type: "select"
         if undo_need_unselect
           undos.push
-            from:  delta.from
-            to:    delta.to
+            from:  selection.from
+            to:    selection.to
             attrs: undo_attrs_list
             type:  "unselect"
 
@@ -179,9 +208,9 @@ class YSelections
         return
       # find first element that has a delimiter (and stop if its a delimiter,
       # a.k.a the end of the list)
-      element = from.prev_cl
+      element = from.getPrev()
       while (not element.selection?) and (element.type isnt "Delimiter")
-        element = element.prev_cl
+        element = element.getPrev()
       # if the element has no selection (looped all over the list)
       # or is an *endpoint* of a selection, there is no intersection
       if (not element.selection?) or element.selection.to is element
@@ -207,7 +236,7 @@ class YSelections
       # ** if $old_selection.to: intersection with $to!
       element = from
       while (element isnt old_selection.to) and (element isnt to)
-        element = element.next_cl
+        element = element.getNext()
 
       if element is old_selection.to
         # no intersection with to!
@@ -215,7 +244,7 @@ class YSelections
         new_selection = createSelection from, old_selection.to, old_selection.attrs
 
         # update references of old_selection
-        old_selection.to = from.prev_cl
+        old_selection.to = from.getPrev()
         old_selection.to.selection = old_selection
 
         # set references of new_selection
@@ -228,10 +257,11 @@ class YSelections
         new_selection = createSelection from, to, old_selection.attrs
 
         # create $opt_selection
-        opt_selection = createSelection to.next_cl, old_selection.to, old_selection.attrs
+        opt_selection = createSelection to.getNext(), old_selection.to, old_selection.attrs
 
         # update references
         old_selection.to = from.prev_cl
+        # update references (pointers to respective selections)
         old_selection.to.selection = old_selection
 
         opt_selection.from.selection = opt_selection
@@ -252,7 +282,7 @@ class YSelections
       # find first selection to the left
       element = to
       while (not element.selection?) and (element isnt from)
-        element = element.prev_cl
+        element = element.getPrev()
       if (not element.selection?) or element.selection["to"] is element
         # no intersection
         return
@@ -271,7 +301,7 @@ class YSelections
       old_selection = element.selection
 
       # create $new_selection
-      new_selection = createSelection to.next_cl, old_selection.to, old_selection.attrs
+      new_selection = createSelection to.getNext(), old_selection.to, old_selection.attrs
 
       # update references
       old_selection.to = to
@@ -283,17 +313,22 @@ class YSelections
 
     cut_off_to()
 
+    delta_has_attrs = false
+    for attr of delta.attrs
+      delta_has_attrs = true
+      break
     # 3. extend / add selections in between
     elem = from
+    to_next = to.getNext()
     # loop in the selection delimited by the delta
-    while (elem isnt to.next_cl)
+    while (elem isnt to_next)
       if elem.selection?
         # just extend the existing selection
         extendSelection elem.selection, delta # will push undo-deltas to $undos
         selection = elem.selection
         @_combine_selection_to_left selection
 
-        elem = selection.to.next_cl
+        elem = selection.to.getNext()
         selection_is_empty = true
         for attr of selection.attrs
           selection_is_empty = false
@@ -303,10 +338,12 @@ class YSelections
       else
         # create a new selection (until you find the next one)
         start = elem
-        while (not elem.next_cl.selection?) and (elem isnt to)
-          elem = elem.next_cl
+        elem_next = elem.getNext()
+        while (not elem_next.selection?) and (elem isnt to)
+          elem = elem_next
+          elem_next = elem.getNext()
         end = elem
-        if delta.type isnt "unselect"
+        if delta.type isnt "unselect" and delta_has_attrs
           attr_list = []
           for n,v of delta.attrs
             attr_list.push n
@@ -319,19 +356,16 @@ class YSelections
           start.selection = selection
           end.selection = selection
           @_combine_selection_to_left elem.selection
-        elem = elem.next_cl
-
-    # find the next selection
-    while elem.isDeleted() and (not elem.selection?)
-      elem = elem.next_cl
-    # and check if you can combine it
+        elem = elem.getNext()
+    
     if elem.selection?
+      # and check if you can combine o.selection
       @_combine_selection_to_left elem.selection
     # also re-connect from
     if from.selection?
       @_combine_selection_to_left from.selection
 
-    return delta # it is necessary that delta is returned in the way it was applied on the global delta.
+    return undos # it is necessary that delta is returned in the way it was applied on the global delta.
     # so that yjs knows exactly what was applied (and how to undo it).
 
   # ???
@@ -347,11 +381,8 @@ class YSelections
   # @param selection [Y.List item] to the end of the selection
   # @param selection [Object] attrs the attributes of the selection
   _combine_selection_to_left: (sel)->
-    first_o = sel.from.prev_cl
-    # find the first selection to the left
-    while first_o? and first_o.isDeleted() and not first_o.selection?
-      first_o = first_o.prev_cl
-    if not (first_o? and first_o.selection?)
+    first_o = sel.from.getPrev()
+    if not first_o.selection?
       # there is no selection to the left
       return
     else
@@ -386,12 +417,13 @@ class YSelections
   # @param from [Y.List item] the start of the selection
   # @param to [Y.List item] the end of the selection
   # @param attrs [Object] the attributes of the selection
-  select: (from, to, attrs)->
+  # @param overwrite [Boolean] overwrite if true
+  select: (from, to, attrs, overwrite)->
     length = 0
     for a of attrs
       length++
       break
-    if length <= 0
+    if length <= 0 and not (overwrite? and overwrite)
       return
 
     delta_operations =
@@ -401,13 +433,21 @@ class YSelections
       attrs: attrs
       type:  "select"
 
+    if overwrite? and overwrite
+      delta.overwrite = true
+
     @_model.applyDelta(delta, delta_operations)
 
-  # unselect _from_ _to_ with an _attribute_, resulting in the removal of the
+  # ???
+  unselectAll: (from, to)->
+    select from, to, {}, true
+      
+  # Unselect _from_ _to_ with an _attribute_, resulting in the removal of the
   # of any selection within these bounds.
   # @param from [Y.List item] the start of the selection
   # @param to [Y.List item] the end of the selection
   # @param attrs [Object] the attributes of the selection
+  # unselect _from_, _to_ with an _attribute_
   unselect: (from, to, attrs)->
     if typeof attrs is "string"
       attrs = [attrs]
@@ -459,16 +499,13 @@ class YSelections
         # if a selection ends here, add it to return value
         if element.selection.to is element
           if sel_start?
-            number_of_attrs = 0
             attrs = {}
             for key,value of element.selection.attrs
               attrs[key] = value
-              number_of_attrs++
-            if number_of_attrs > 0
-              result.push
-                from:  sel_start
-                to:    pos
-                attrs: attrs
+            result.push
+              from:  sel_start
+              to:    pos
+              attrs: attrs
             sel_start = null
           else
             throw new Error "Found two consecutive to elements. The selections
