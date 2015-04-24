@@ -1,11 +1,10 @@
-
 # compare two object for equality (no deep check!)
-compare_objects = (o, p, doAgain=true)->
-  for n,v of o
-    if not (p[n]? and p[n] is v)
+compare_objects = (obj1, obj2, doAgain=true)->
+  for key, value of obj1
+    if not (obj2[key]? and obj2[key] is value)
       return false
   if doAgain
-    compare_objects(p,o,false)
+    compare_objects(obj2, obj1, false)
   else
     true
 
@@ -28,11 +27,11 @@ class YSelections
 
   _getCompositionValue: ()->
     composition_value_operations = {}
-    composition_value = for v,i in @_composition_value
-      composition_value_operations[""+i+"/from"] = v.from
-      composition_value_operations[""+i+"/to"] = v.to
+    composition_value = for value, index in @_composition_value
+      composition_value_operations[""+index+"/from"] = value.from
+      composition_value_operations[""+index+"/to"] = value.to
       {
-        attrs: v.attrs
+        attrs: value.attrs
       }
 
     return {
@@ -42,9 +41,9 @@ class YSelections
 
 
   _setCompositionValue: (composition_value)->
-    for v in composition_value
-      v.type = "select"
-      @_apply v
+    for value in composition_value
+      value.type = "select"
+      @_apply value
 
   _apply: (delta)->
     undos = [] # list of deltas that are necessary to undo the change
@@ -71,13 +70,13 @@ class YSelections
                 if sel.from is ref and sel.to is ref
                   @_removeFromCompositionValue sel
                 else if sel.from is ref
-                  prev = ref.getNext()
-                  sel.from = prev
-                  prev.selection = sel
-                else if sel.to is ref
-                  next = ref.getPrev()
-                  sel.to = next
+                  next = ref.getNext()
+                  sel.from = next
                   next.selection = sel
+                else if sel.to is ref
+                  prev = ref.getPrev()
+                  sel.to = prev
+                  prev.selection = sel
                 else
                   throw new Error "Found weird inconsistency! Y.Selections is no longer safe to use!"
               next = event.reference.getNext()
@@ -90,27 +89,28 @@ class YSelections
       to: to
       type: delta.type
       attrs: delta.attrs
-    for l in @_listeners
-      l.call this, observer_call
+    for listener in @_listeners
+      listener.call this, observer_call
+
     createSelection = (from, to, attrs)=>
       new_attrs = {}
-      for n,v of attrs
-        new_attrs[n] = v
-      new_sel = {
-        from: from
-        to: to
+      for key,value of attrs
+        new_attrs[key] = value
+      new_sel =
+        from:  from
+        to:    to
         attrs: new_attrs
-      }
       @_composition_value.push new_sel
       new_sel
 
     extendSelection = (selection)->
       if delta.type is "unselect"
         undo_attrs = {}
-        for n in delta.attrs
-          if selection.attrs[n]?
-            undo_attrs[n] = selection.attrs[n]
-          delete selection.attrs[n]
+        for key in delta.attrs
+          if selection.attrs[key]?
+            undo_attrs[key] = selection.attrs[key]
+          delete selection.attrs[key]
+        # add the operation to recreate it
         undos.push
           from: delta.from
           to: delta.to
@@ -121,14 +121,15 @@ class YSelections
         undo_attrs_list = [] # for undo selection (not overwrite)
         undo_need_unselect = false
         undo_need_select = false
-        for n,v of delta.attrs
-          if selection.attrs[n]?
-            undo_attrs[n] = selection.attrs[n]
+        for key,value of delta.attrs
+          # if key already defined, reversing it is selecting with previous attrs
+          if selection.attrs[key]?
+            undo_attrs[key] = selection.attrs[key]
             undo_need_select = true
           else
-            undo_attrs_list.push n
+            undo_attrs_list.push key
             undo_need_unselect = true
-          selection.attrs[n] = v
+          selection.attrs[key] = value
         if undo_need_select
           undos.push
             from: delta.from
@@ -154,13 +155,16 @@ class YSelections
       if from.selection? and from.selection.from is from
         # does not intersect, because the start is already selected
         return
-      # find first selection to the left
-      o = from.prev_cl
-      while (not o.selection?) and (o.type isnt "Delimiter")
-        o = o.prev_cl
-      if (not o.selection?) or o.selection.to is o
-        # no intersection
+      # find first element that has a delimiter (and stop if its a delimiter,
+      # a.k.a the end of the list)
+      element = from.prev_cl
+      while (not element.selection?) and (element.type isnt "Delimiter")
+        element = element.prev_cl
+      # if the element has no selection (looped all over the list)
+      # or is an *endpoint* of a selection, there is no intersection
+      if (not element.selection?) or element.selection.to is element
         return
+
       # We found a selection that intersects with $from.
       # Now we have to check if it also intersects with $to.
       # Then we cut it in such a way,
@@ -173,17 +177,17 @@ class YSelections
       #   - created, right after $from
       # opt_selection is outer (after $to)
       #   - created (if necessary), right after $to
-      old_selection = o.selection
+      old_selection = element.selection
 
       # check if found selection also intersects with $to
       # * starting from $from, go to the right until you found either $to or old_selection.to
       # ** if $to: no intersection with $to
       # ** if $old_selection.to: intersection with $to!
-      o = from
-      while (o isnt old_selection.to) and (o isnt to)
-        o = o.next_cl
+      element = from
+      while (element isnt old_selection.to) and (element isnt to)
+        element = element.next_cl
 
-      if o is old_selection.to
+      if element is old_selection.to
         # no intersection with to!
         # create $new_selection
         new_selection = createSelection from, old_selection.to, old_selection.attrs
@@ -225,10 +229,10 @@ class YSelections
         # does not intersect, because the end is already selected
         return
       # find first selection to the left
-      o = to
-      while (not o.selection?) and (o isnt from)
-        o = o.prev_cl
-      if (not o.selection?) or o.selection["to"] is o
+      element = to
+      while (not element.selection?) and (element isnt from)
+        element = element.prev_cl
+      if (not element.selection?) or element.selection["to"] is element
         # no intersection
         return
       # We found a selection that intersects with $to.
@@ -242,7 +246,7 @@ class YSelections
       # new_selection is outer ( outer $from and $to)
       #   - created, right after $to
 
-      old_selection = o.selection
+      old_selection = element.selection
 
       # create $new_selection
       new_selection = createSelection to.next_cl, old_selection.to, old_selection.attrs
@@ -258,15 +262,16 @@ class YSelections
     cut_off_to()
 
     # 3. extend / add selections in between
-    o = from
-    while (o isnt to.next_cl)
-      if o.selection?
+    elem = from
+    # loop in the selection delimited by the delta
+    while (elem isnt to.next_cl)
+      if elem.selection?
         # just extend the existing selection
-        extendSelection o.selection, delta # will push undo-deltas to $undos
-        selection = o.selection
+        extendSelection elem.selection, delta # will push undo-deltas to $undos
+        selection = elem.selection
         @_combine_selection_to_left selection
 
-        o = selection.to.next_cl
+        elem = selection.to.next_cl
         selection_is_empty = true
         for attr of selection.attrs
           selection_is_empty = false
@@ -275,10 +280,10 @@ class YSelections
           @_removeFromCompositionValue selection
       else
         # create a new selection (until you find the next one)
-        start = o
-        while (not o.next_cl.selection?) and (o isnt to)
-          o = o.next_cl
-        end = o
+        start = elem
+        while (not elem.next_cl.selection?) and (elem isnt to)
+          elem = elem.next_cl
+        end = elem
         if delta.type isnt "unselect"
           attr_list = []
           for n,v of delta.attrs
@@ -291,15 +296,15 @@ class YSelections
           selection = createSelection start, end, delta.attrs
           start.selection = selection
           end.selection = selection
-          @_combine_selection_to_left o.selection
-        o = o.next_cl
+          @_combine_selection_to_left elem.selection
+        elem = elem.next_cl
 
     # find the next selection
-    while o.isDeleted() and (not o.selection?)
-      o = o.next_cl
+    while elem.isDeleted() and (not elem.selection?)
+      elem = elem.next_cl
     # and check if you can combine it
-    if o.selection?
-      @_combine_selection_to_left o.selection
+    if elem.selection?
+      @_combine_selection_to_left elem.selection
     # also re-connect from
     if from.selection?
       @_combine_selection_to_left from.selection
@@ -308,8 +313,8 @@ class YSelections
     # so that yjs knows exactly what was applied (and how to undo it).
 
   _removeFromCompositionValue: (sel)->
-    @_composition_value = @_composition_value.filter (o)->
-      o isnt sel
+    @_composition_value = @_composition_value.filter (s)->
+      s isnt sel
     delete sel.from.selection
     delete sel.to.selection
 
@@ -387,32 +392,34 @@ class YSelections
   # * get all the selections of a y-list
   # * this will also test if the selections are well formed (after $from follows $to follows $from ..)
   getSelections: (list)->
-    o = list.ref(0)
-    if not o?
+    element = list.ref(0)
+    if not element?
       return []
 
     sel_start = null
     pos = 0
     result = []
 
-    while o.next_cl?
-      if o.isDeleted()
-        if o.selection?
-          throw new Error "You forgot to delete the selection from this operation! y-selections is no longer safe to use!"
-        o = o.next_cl
+    # go through the list element by element
+    while element.next_cl?
+      # check that a deleted element has no selection bounded anymore
+      if element.isDeleted()
+        if element.selection?
+        # deleted element, jump to element
+        element = element.next_cl
         continue
-      if o.selection?
-        if o.selection.from is o
+      if element.selection?
+        if element.selection.from is element
           if sel_start?
             throw new Error "Found two consecutive from elements. The selections are no longer safe to use! (contact the owner of the repository)"
           else
             sel_start = pos
-        if o.selection.to is o
+        if element.selection.to is element
           if sel_start?
             number_of_attrs = 0
             attrs = {}
-            for n,v of o.selection.attrs
-              attrs[n] = v
+            for key,value of element.selection.attrs
+              attrs[key] = value
               number_of_attrs++
             if number_of_attrs > 0
               result.push
@@ -422,18 +429,18 @@ class YSelections
             sel_start = null
           else
             throw new Error "Found two consecutive to elements. The selections are no longer safe to use! (contact the owner of the repository)"
-        else if o.selection.from isnt o
           throw new Error "This reference should not point to this selection, because the selection does not point to the reference. The selections are no longer safe to use! (contact the owner of the repository)"
+        else if element.selection.from isnt element
       pos++
-      o = o.next_cl
+      element = element.next_cl
     return result
 
-  observe: (f)->
-    @_listeners.push f
+  observe: (fun)->
+    @_listeners.push fun
 
-  unobserve: (f)->
-    @_listeners = @_listeners.filter (g)->
-      f != g
+  unobserve: (fun)->
+    @_listeners = @_listeners.filter (otherFun)->
+      fun != otherFun
 
 
 if window?
