@@ -50,7 +50,8 @@ class YSelections
     from = delta.from
     to = delta.to
 
-    # if never applied a delta on this list, add a listener to it in order to change selections if necessary
+    # if never applied a delta on this list, add a listener to it in order to
+    # change selections if necessary
     if delta.type is "select"
       parent = from.getParent()
       parent_exists = false
@@ -60,13 +61,14 @@ class YSelections
           break
       if not parent_exists
         @_lists.push parent
-        parent.observe (events)=>
+        parent.observe (events) =>
           for event in events
             if event.type is "delete"
               if event.reference.selection?
                 ref = event.reference
                 sel = ref.selection
-                delete ref.selection # delete it, because ref is going to get deleted!
+                # delete it, because ref is going to get deleted!
+                delete ref.selection
                 if sel.from is ref and sel.to is ref
                   @_removeFromCompositionValue sel
                 else if sel.from is ref
@@ -78,16 +80,17 @@ class YSelections
                   sel.to = prev
                   prev.selection = sel
                 else
-                  throw new Error "Found weird inconsistency! Y.Selections is no longer safe to use!"
+                  throw new Error "Found weird inconsistency! Y.Selections is
+                    no longer safe to use!"
               next = event.reference.getNext()
               if next.selection?
                 @_combine_selection_to_left next.selection
 
     # notify listeners:
     observer_call =
-      from: from
-      to: to
-      type: delta.type
+      from:  from
+      to:    to
+      type:  delta.type
       attrs: delta.attrs
     for listener in @_listeners
       listener.call this, observer_call
@@ -112,10 +115,10 @@ class YSelections
           delete selection.attrs[key]
         # add the operation to recreate it
         undos.push
-          from: delta.from
-          to: delta.to
+          from:  delta.from
+          to:    delta.to
           attrs: undo_attrs
-          type: "select"
+          type:  "select"
       else
         undo_attrs = {} # for undo selection (overwrite of existing selection)
         undo_attrs_list = [] # for undo selection (not overwrite)
@@ -132,16 +135,16 @@ class YSelections
           selection.attrs[key] = value
         if undo_need_select
           undos.push
-            from: delta.from
-            to: delta.to
+            from:  delta.from
+            to:    delta.to
             attrs: undo_attrs
-            type: "select"
+            type:  "select"
         if undo_need_unselect
           undos.push
-            from: delta.from
-            to: delta.to
+            from:  delta.from
+            to:    delta.to
             attrs: undo_attrs_list
-            type: "unselect"
+            type:  "unselect"
 
     # Algorithm overview:
     # 1. cut off the selection that intersects with from
@@ -167,8 +170,8 @@ class YSelections
 
       # We found a selection that intersects with $from.
       # Now we have to check if it also intersects with $to.
-      # Then we cut it in such a way,
-      # that the selection does not intersect with $from and $to anymore.
+      # Then we cut it in such a way, that the selection does not intersect
+      # with $from and $to anymore.
 
       # this is a reference for the selections that are created/modified:
       # old_selection is outer (not between $from $to)
@@ -236,11 +239,12 @@ class YSelections
         # no intersection
         return
       # We found a selection that intersects with $to.
-      # Now we have to cut it in such a way,
-      # that the selection does not intersect with $to anymore.
+      # Now we have to cut it in such a way that the selection does not
+      # intersect with $to anymore.
 
       # this is a reference for the selections that are created/modified:
-      # it is similar to the one above, except that we do not need opt_selection anymore!
+      # it is similar to the one above, except that we do not need opt_selection
+      # anymore!
       # old_selection is inner (between $from and $to)
       #   - will be changed in such a way that it is to the left of $to
       # new_selection is outer ( outer $from and $to)
@@ -365,10 +369,10 @@ class YSelections
 
     delta_operations =
       from: from
-      to: to
+      to:   to
     delta =
       attrs: attrs
-      type: "select"
+      type:  "select"
 
     @_model.applyDelta(delta, delta_operations)
 
@@ -377,15 +381,16 @@ class YSelections
     if typeof attrs is "string"
       attrs = [attrs]
     if attrs.constructor isnt Array
-      throw new Error "Y.Selections.prototype.unselect expects an Array or String as the third parameter (attributes)!"
+      throw new Error "Y.Selections.prototype.unselect expects an Array or
+        String as the third parameter (attributes)!"
     if attrs.length <= 0
       return
     delta_operations =
       from: from
-      to: to
+      to:   to
     delta =
       attrs: attrs
-      type: "unselect"
+      type:  "unselect"
 
     @_model.applyDelta(delta, delta_operations)
 
@@ -405,13 +410,16 @@ class YSelections
       # check that a deleted element has no selection bounded anymore
       if element.isDeleted()
         if element.selection?
+          throw new Error "You forgot to delete the selection from this
+            operation! y-selections is no longer safe to use!"
         # deleted element, jump to element
         element = element.next_cl
         continue
       if element.selection?
         if element.selection.from is element
           if sel_start?
-            throw new Error "Found two consecutive from elements. The selections are no longer safe to use! (contact the owner of the repository)"
+            throw new Error "Found two consecutive from elements. The selections
+              are no longer safe to use! (contact the owner of the repository)"
           else
             sel_start = pos
         if element.selection.to is element
@@ -423,14 +431,18 @@ class YSelections
               number_of_attrs++
             if number_of_attrs > 0
               result.push
-                from: sel_start
-                to: pos
+                from:  sel_start
+                to:    pos
                 attrs: attrs
             sel_start = null
           else
-            throw new Error "Found two consecutive to elements. The selections are no longer safe to use! (contact the owner of the repository)"
-          throw new Error "This reference should not point to this selection, because the selection does not point to the reference. The selections are no longer safe to use! (contact the owner of the repository)"
+            throw new Error "Found two consecutive to elements. The selections
+              are no longer safe to use! (contact the owner of the repository)"
         else if element.selection.from isnt element
+          throw new Error "This reference should not point to this selection,
+            because the selection does not point to the reference. The
+            selections are no longer safe to use! (contact the owner of the
+            repository)"
       pos++
       element = element.next_cl
     return result
